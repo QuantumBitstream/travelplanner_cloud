@@ -114,4 +114,51 @@ public class ChatController {
         return emitter;
     }
 
+    @GetMapping("/chat/get/sse")
+    public SseEmitter chatGetSse(@RequestParam Map<String, String> request) {
+        SseEmitter emitter = new SseEmitter(0L); // 无超时
+        String message = request.get("message");
+
+        // 设置完成和错误回调
+        emitter.onCompletion(() -> System.out.println("SSE completed"));
+        emitter.onError(ex -> System.err.println("SSE error: " + ex.getMessage()));
+
+        // 启动异步处理
+        new Thread(() -> {
+            try {
+                deepSeekService.chatStream(message, new StreamingResponseHandler<AiMessage>() {
+                    @Override
+                    public void onNext(String token) {
+                        try {
+                            emitter.send(SseEmitter.event().data(token));
+                        } catch (IOException e) {
+                            // 处理发送错误
+                            onError(e);
+                        }
+                    }
+
+                    @Override
+                    public void onComplete(Response<AiMessage> response) {
+                        try {
+                            // 可选：发送完成标记
+                            emitter.send(SseEmitter.event().name("complete").data(""));
+                            emitter.complete();
+                        } catch (IOException e) {
+                            onError(e);
+                        }
+                    }
+
+                    @Override
+                    public void onError(Throwable error) {
+                        emitter.completeWithError(error);
+                    }
+                });
+            } catch (Exception ex) {
+                emitter.completeWithError(ex);
+            }
+        }).start();
+
+        return emitter;
+    }
+
 }  
